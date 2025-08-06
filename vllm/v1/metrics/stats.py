@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
@@ -82,12 +83,13 @@ class FinishedRequestStats:
     prefill_time: float = 0.0
     inference_time: float = 0.0
     decode_time: float = 0.0
+    num_cached_tokens: int = 0
 
 
 class IterationStats:
     """Stats associated with a single set of EngineCoreOutputs."""
 
-    def __init__(self):
+    def __init__(self, prefill_avg_tokens_per_second_history: Optional[deque] = None):
         self.iteration_timestamp = time.time()
         self.num_generation_tokens = 0
         self.num_prompt_tokens = 0
@@ -99,6 +101,10 @@ class IterationStats:
         self.time_per_output_tokens_iter: list[float] = []
         self.waiting_lora_adapters: dict[str, int] = {}
         self.running_lora_adapters: dict[str, int] = {}
+        
+        # Use the provided history deque, or create a new one if None
+        # Note: We store a reference to the engine's history deque
+        self.prefill_avg_tokens_per_second_history = prefill_avg_tokens_per_second_history
 
     def _time_since(self, start: float) -> float:
         """Calculate an interval relative to this iteration's timestamp."""
@@ -154,7 +160,8 @@ class IterationStats:
     def update_from_finished_request(self, finish_reason: "FinishReason",
                                      num_prompt_tokens: int,
                                      max_tokens_param: Optional[int],
-                                     req_stats: RequestStateStats):
+                                     req_stats: RequestStateStats,
+                                     num_cached_tokens: int = 0):
         e2e_latency = self._time_since(req_stats.arrival_time)
 
         # Queued interval is from first QUEUED event to first SCHEDULED
@@ -171,6 +178,16 @@ class IterationStats:
         # Inference interval is from first SCHEDULED to last NEW_TOKEN
         # Any preemptions during prefill or decode are included
         inference_time = req_stats.last_token_ts - req_stats.scheduled_ts
+        uncomputed_tokens = num_prompt_tokens - num_cached_tokens
+        # Calculate uncomputed KV cache tokens per prefill time for this request
+        if prefill_time > 0 and uncomputed_tokens > 0:
+            # Calculate uncomputed tokens: total prompt tokens minus cached tokens
+
+            
+            # Only add to history if have valid uncomputed tokens and prefill time
+                prefill_avg_tokens_per_second = uncomputed_tokens / prefill_time
+                # Add to rolling average history
+                self.prefill_avg_tokens_per_second_history.append(prefill_avg_tokens_per_second)
 
         finished_req = \
             FinishedRequestStats(finish_reason=finish_reason,
@@ -181,8 +198,15 @@ class IterationStats:
                                  queued_time=queued_time,
                                  prefill_time=prefill_time,
                                  inference_time=inference_time,
-                                 decode_time=decode_time)
+                                 decode_time=decode_time,
+                                 num_cached_tokens=num_cached_tokens)
         self.finished_requests.append(finished_req)
+
+    def get_prefill_avg_tokens_per_second(self) -> float:
+        """Get the current rolling average of prefill tokens per second."""
+        if not self.prefill_avg_tokens_per_second_history:
+            return -1.0
+        return sum(self.prefill_avg_tokens_per_second_history) / len(self.prefill_avg_tokens_per_second_history)
 
 
 class LoRARequestStates:

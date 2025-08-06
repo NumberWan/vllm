@@ -433,7 +433,7 @@ class OutputProcessor:
 
                 # Track per-request stats
                 self._update_stats_from_finished(req_state, finish_reason,
-                                                 iteration_stats)
+                                                 iteration_stats, num_cached_tokens)
 
         self.lora_states.update_iteration_stats(iteration_stats)
 
@@ -461,7 +461,8 @@ class OutputProcessor:
 
     def _update_stats_from_finished(self, req_state: RequestState,
                                     finish_reason: Optional[FinishReason],
-                                    iteration_stats: Optional[IterationStats]):
+                                    iteration_stats: Optional[IterationStats],
+                                    num_cached_tokens: int = 0):
         if iteration_stats is None:
             return
 
@@ -471,7 +472,8 @@ class OutputProcessor:
             finish_reason=finish_reason,
             num_prompt_tokens=len(req_state.prompt_token_ids),
             max_tokens_param=req_state.max_tokens_param,
-            req_stats=req_state.stats)
+            req_stats=req_state.stats,
+            num_cached_tokens=num_cached_tokens)
         self.lora_states.finish_request(req_state)
 
         ParentRequest.observe_finished_request(

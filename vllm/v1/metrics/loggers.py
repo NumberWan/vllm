@@ -4,6 +4,7 @@
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections import deque
 from typing import Callable, Optional, Union
 
 import prometheus_client
@@ -263,6 +264,15 @@ class PrometheusStatLogger(StatLoggerBase):
             labelnames=labelnames)
         self.counter_prefix_cache_hits = make_per_engine(
             counter_prefix_cache_hits, engine_indexes, model_name)
+
+        # Prefill average tokens per second gauge (actually uncomputed KV cache tokens divided by prefill time)
+        gauge_prefill_avg_tokens_per_second = self._gauge_cls(
+            name="vllm:prefill_avg_tokens_per_second",
+            documentation="100 requests rolling average of uncomputed KV cache tokens per second",
+            multiprocess_mode="mostrecent",
+            labelnames=labelnames)
+        self.gauge_prefill_avg_tokens_per_second = make_per_engine(
+            gauge_prefill_avg_tokens_per_second, engine_indexes, model_name)
 
         #
         # Counters
@@ -529,6 +539,8 @@ class PrometheusStatLogger(StatLoggerBase):
         self.histogram_iteration_tokens[engine_idx].observe(
             iteration_stats.num_prompt_tokens + \
             iteration_stats.num_generation_tokens)
+        self.gauge_prefill_avg_tokens_per_second[engine_idx].set(
+            iteration_stats.get_prefill_avg_tokens_per_second())
 
         for max_gen_tokens in iteration_stats.max_num_generation_tokens_iter:
             self.histogram_max_num_generation_tokens_request[

@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import asyncio
 import time
+from collections import deque
 from collections.abc import AsyncGenerator, Mapping
 from copy import copy
 from typing import Any, Optional, Union
@@ -94,7 +95,6 @@ class AsyncLLM(EngineClient):
         self.vllm_config = vllm_config
         self.log_requests = log_requests
         self.log_stats = log_stats
-
         if self.model_config.skip_tokenizer_init:
             self.tokenizer = None
         else:
@@ -381,7 +381,7 @@ class AsyncLLM(EngineClient):
         output_processor = self.output_processor
         log_stats = self.log_stats
         logger_manager = self.logger_manager
-
+        prefill_avg_tokens_per_second_history = deque(maxlen=100)
         async def output_handler():
             try:
                 while True:
@@ -389,7 +389,7 @@ class AsyncLLM(EngineClient):
                     outputs = await engine_core.get_output_async()
                     num_outputs = len(outputs.outputs)
 
-                    iteration_stats = IterationStats() if (
+                    iteration_stats = IterationStats(prefill_avg_tokens_per_second_history) if (
                         log_stats and num_outputs) else None
 
                     # Split outputs into chunks of at most

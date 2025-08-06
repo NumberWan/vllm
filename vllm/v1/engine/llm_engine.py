@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from collections import deque
 from collections.abc import Mapping
 from copy import copy
 from typing import Any, Callable, Optional, Union
@@ -72,6 +73,9 @@ class LLMEngine:
         self.stat_logger: Optional[StatLoggerBase] = None
         if self.log_stats:
             self.stat_logger = PrometheusStatLogger(vllm_config)
+        
+        # Create prefill history for long-term statistics tracking
+        self.prefill_avg_tokens_per_second_history = deque(maxlen=100) if self.log_stats else None
 
         # important: init dp group before init the engine_core
         # In the decoupled engine case this is handled in EngineCoreProc.
@@ -241,7 +245,7 @@ class LLMEngine:
         outputs = self.engine_core.get_output()
 
         # 2) Process EngineCoreOutputs.
-        iteration_stats = IterationStats() if self.log_stats else None
+        iteration_stats = IterationStats(self.prefill_avg_tokens_per_second_history) if self.log_stats else None
         processed_outputs = self.output_processor.process_outputs(
             outputs.outputs,
             engine_core_timestamp=outputs.timestamp,
